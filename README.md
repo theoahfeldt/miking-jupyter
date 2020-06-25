@@ -1,6 +1,6 @@
 # Miking Jupyter
 
-The purpose of the Miking Jupyter project is to:
+The goals of the Miking Jupyter project are to:
 
 * Integrate Miking with the [Jupyter](https://jupyter.org/)
   environment by providing a Miking kernel for Jupyter.
@@ -8,7 +8,7 @@ The purpose of the Miking Jupyter project is to:
 * Provide seamless integration with Python from Miking languages,
   meaning that Miking functions can call Python code and the reverse.
 
-* Support syntax highlighting and code editor customization for arbitrary DSL designed in Miking.
+* Support syntax highlighting and code editor customization for arbitrary DSLs designed in Miking.
 
 * Support visualization within Jupyter notebooks.
 
