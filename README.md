@@ -43,14 +43,14 @@ To try out the kernel, you will need the following dependencies:
 
 Make sure you have all dependencies installed, and that the MCore bootstrap
 interpreter `miking` is in your `PATH`. Then, run the following command from the
-`miking-jupyter` folder to install the kernel.
+project root directory to install the kernel.
 
 ```
 jupyter kernelspec install mcore_kernel/
 ```
 
 The kernel should now be known to Jupyter. To run it, **make sure you are in
-the `miking-jupyter` folder**, so that Python can locate the kernel module as
+the project root**, so that Python can locate the kernel module as
 `mcore_kernel.kernel`. In the future, the kernel will be packaged so that Python
 can find it from any directory.
 
