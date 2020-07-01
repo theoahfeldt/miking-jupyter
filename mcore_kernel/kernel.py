@@ -11,6 +11,7 @@ class McoreKernel(Kernel):
         'name': 'MCore',
         'mimetype': 'text/plain',
         'file_extension': '.mc',
+        'codemirror_mode': 'ocaml'
     }
     banner = """The core language of Miking - a meta language system
 for creating embedded domain-specific and general-purpose languages"""
