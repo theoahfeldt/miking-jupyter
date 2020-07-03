@@ -18,11 +18,11 @@ for creating embedded domain-specific and general-purpose languages"""
 
     def __init__(self, **kwargs):
         Kernel.__init__(self, **kwargs)
-        self.wrapper = replwrap.REPLWrapper("miking repl", ">> ", None, continuation_prompt=" | ")
+        self.wrapper = replwrap.REPLWrapper("miking repl --no-line-edit", ">> ", None, continuation_prompt=" | ")
 
     def do_execute(self, code, silent, store_history=True, user_expressions=None,
                    allow_stdin=False):
-        output = self.wrapper.run_command(code + ";;")
+        output = self.wrapper.run_command(":{\n" + code + "\n:}")
         if not silent:
             stream_content = {'name': 'stdout', 'text': output}
             self.send_response(self.iopub_socket, 'stream', stream_content)
