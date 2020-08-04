@@ -12,63 +12,6 @@ The goals of the Miking Jupyter project are to:
 
 * Support visualization within Jupyter notebooks.
 
-## Jupyter Kernel
-
-Currently, a simple Jupyter kernel extending the main IPython kernel is
-available in [`mcore_kernel`](./mcore_kernel). It depends on the MCore REPL to
-execute code from the user; presently, it simply feeds the cell contents into
-the REPL and then displays the results.
-
-### Dependencies and setup
-
-To try out the kernel, you will need the following dependencies:
-
-- [Jupyter](https://jupyter.org/) and [IPython](https://ipython.org/).
-
-  Installation using pip:
-  `pip install ipython jupyter`
-
-- The package [pexpect](https://pypi.org/project/pexpect/) is used to control
-  the REPL process.
-
-  Installation using pip:
-  `pip install pexpect`
-
-- The Miking bootstrap interpreter REPL. This should be available at the
-  `develop` branch of the
-  [main Miking repo](https://github.com/miking-lang/miking). Note that the
-  bootstrap interpreter needs to be available in `PATH` under the name `mi`.
-
-### Getting started
-
-Make sure you have all dependencies installed, and that the MCore bootstrap
-interpreter `mi` is in your `PATH`. Then, run the following command from the
-project root directory to install the kernel.
-
-```
-jupyter kernelspec install mcore_kernel/
-```
-
-The kernel should now be known to Jupyter. To run it, **make sure you are in
-the project root**, so that Python can locate the kernel module as
-`mcore_kernel.kernel`. In the future, the kernel will be packaged so that Python
-can find it from any directory.
-
-You should now be able to run the kernel. For instance, to start a notebook,
-run
-
-```
-jupyter notebook
-```
-
-and open a new notebook, selecting the `MCore` kernel. To test things out
-quickly, check out the [`Example.ipynb`](./Example.ipynb) notebook.
-
-For more information on how to use a Jupyter notebook, check out their website
-or this
-[tutorial](https://mybinder.org/v2/gh/ipython/ipython-in-depth/master?filepath=binder/Index.ipynb)
-at https://mybinder.org/
-
 ## MIT License
 
 Copyright (c) 2020 David Broman

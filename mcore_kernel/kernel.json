@@ -1,3 +1,0 @@
-{"argv":["python","-m","mcore_kernel.kernel", "-f", "{connection_file}"],
- "display_name":"MCore"
-}
