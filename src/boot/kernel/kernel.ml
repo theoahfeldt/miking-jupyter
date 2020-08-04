@@ -79,7 +79,7 @@ let eval_python code =
   else
     Py.Run.eval ~start:Py.File code
 
-let exec ~count:_ code =
+let exec ~count code =
   try
     let result =
       match get_python code with
@@ -90,7 +90,7 @@ let exec ~count:_ code =
         else
           Some(Py.Object.to_string py_val)
       | None ->
-        parse_prog_or_mexpr code
+        parse_prog_or_mexpr (Printf.sprintf "In [%d]" count) code
         |> repl_eval_ast
         |> repl_format
         |> Option.map (Ustring.to_utf8)
