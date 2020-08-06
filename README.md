@@ -41,10 +41,23 @@ demonstrating MCore and the kernel's capabilities at `MCoreJupyter.ipynb`.
 ### Getting started
 
 Before using the Jupyter kernel you need to install some dependencies.
-The Jupyter kernel requires all the base dependencies of the boot interpreter
-(`dune`, `batteries`, and `linenoise`),
-and the `pyml` Python bindings for OCaml. For information on how to install
-these, see the [main repository](https://github.com/miking-lang/miking/tree/develop).
+The Jupyter kernel requires the Miking bootstrap interpreter,
+and the `pyml` Python bindings for OCaml.
+
+First, install `pyml` to make sure `boot` is built with Python support:
+
+```bash
+opam install pyml
+```
+
+For more details and troubleshooting when installing `pyml`, see the main repository's
+[README.md](https://github.com/miking-lang/miking/blob/develop/README.md#Python).
+Then, install the `boot` package. This can be done using `opam` with the following:
+
+```bash
+opam pin add boot https://github.com/miking-lang/miking.git#develop
+opam install boot
+```
 
 Next, you will need to have Jupyter itself installed.
 To install Jupyter using `pip`, run the following command:
@@ -73,11 +86,11 @@ Once this is done, `jupyter-kernel` can be installed through `opam`, using:
 opam install jupyter-kernel
 ```
 
-Finally, to install the Jupyter kernel, use the make target `kernel-install`,
-by running the following command:
+Finally, to install the Jupyter kernel, use the `make.sh` script:
+(Note that you may first have to execute `chmod +x make.sh`)
 
 ```bash
-make kernel-install
+./make.sh install
 ```
 
 You are now ready to start using the kernel. For example, to start a new Jupyter
