@@ -1,6 +1,8 @@
 open Jupyter_kernel
-open Repl
-open Eval
+open Boot.Repl
+open Boot.Eval
+
+let to_utf8 = Boot.Ustring.to_utf8
 
 let current_output = ref (BatIO.output_string ())
 let other_actions = ref []
@@ -9,7 +11,7 @@ let text_data_of_string str =
   Client.Kernel.mime ~ty:"text/plain" str
 
 let kernel_output_string str = BatIO.nwrite !current_output str
-let kernel_output_ustring ustr = ustr |> Ustring.to_utf8 |> kernel_output_string
+let kernel_output_ustring ustr = ustr |> to_utf8 |> kernel_output_string
 
 let _ = Py.initialize ~version:3 ()
 let ocaml_module = Py.Import.add_module "_mcore_kernel"
@@ -43,7 +45,7 @@ os.environ['MPLBACKEND']='module://src.boot.kernel.mpl_backend'";
 
 let init () =
   initialize_envs ();
-  Mexpr.program_output := kernel_output_ustring;
+  Boot.Mexpr.program_output := kernel_output_ustring;
   Py.Module.set_function ocaml_module "after_exec" (fun _ -> Py.none);
   init_py_print ();
   init_py_mpl ();
@@ -91,7 +93,7 @@ let exec ~count code =
         parse_prog_or_mexpr (Printf.sprintf "In [%d]" count) code
         |> repl_eval_ast
         |> repl_format
-        |> Option.map (Ustring.to_utf8)
+        |> Option.map to_utf8
     in
     ignore @@ Py.Module.get_function ocaml_module "after_exec" [||];
     let new_actions =
@@ -104,7 +106,7 @@ let exec ~count code =
     other_actions := [];
     Lwt.return (Ok { Client.Kernel.msg=result
                    ; Client.Kernel.actions=actions})
-  with e -> Lwt.return (Error (error_to_ustring e |> Ustring.to_utf8))
+  with e -> Lwt.return (Error (error_to_ustring e |> to_utf8))
 
 let complete ~pos str =
   let start_pos, completions = get_completions str pos in

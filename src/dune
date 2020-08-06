@@ -1,0 +1,4 @@
+(executable
+  (name kernel)
+  (libraries boot jupyter-kernel pyml)
+)
