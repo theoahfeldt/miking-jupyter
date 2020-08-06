@@ -1,3 +1,0 @@
-{"argv":["build/kernel","--connection-file", "{connection_file}"],
- "display_name":"MCore"
-}
