@@ -139,7 +139,7 @@ Running the cell will print `foobar`, as one might expect.
 
 You can call the functions you have defined in Python cells in normal MCore
 cells by using the Python intrinsics (for more information on these, see
-[README.md](./README.md) or the example notebook). A user-defined function can
+[README.md](https://github.com/miking-lang/miking/blob/develop/README.md#Python) or the example notebook). A user-defined function can
 be called by importing and using the Python module `__main__`. For example,
 consider the following cell:
 
