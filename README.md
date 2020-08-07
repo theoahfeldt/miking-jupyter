@@ -86,8 +86,9 @@ Once this is done, `jupyter-kernel` can be installed through `opam`, using:
 opam install jupyter-kernel
 ```
 
-Finally, to install the Jupyter kernel, use the `make.sh` script:
-(Note that you may first have to execute `chmod +x make.sh`)
+Finally, to install the Jupyter kernel, use the `make.sh` script
+(note that you may have to run `chmod +x make.sh` the first time to make the
+script executable):
 
 ```bash
 ./make.sh install
