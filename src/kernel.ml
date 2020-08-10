@@ -1,11 +1,13 @@
 open Jupyter_kernel
 open Boot.Repl
 open Boot.Eval
+open Lwt
 
 let to_utf8 = Boot.Ustring.to_utf8
 
 let current_output = ref (BatIO.output_string ())
 let other_actions = ref []
+let ipm_path = Sys.getenv_opt "MI_IPM_PATH"
 
 let text_data_of_string str =
   Client.Kernel.mime ~ty:"text/plain" str
@@ -50,16 +52,30 @@ let init () =
   Py.Module.set_function ocaml_module "after_exec" (fun _ -> Py.none);
   init_py_print ();
   init_py_mpl ();
-  Lwt.return ()
+  return ()
 
-let get_python code =
-  let python_indicator, content =
-    try BatString.split code ~by:"\n"
-    with Not_found -> ("", code)
-  in
-  match python_indicator with
-  | "%%python" -> Some content
-  | _ -> None
+let parse_and_eval code count =
+  parse_prog_or_mexpr (Printf.sprintf "In [%d]" count) code
+  |> repl_eval_ast
+
+let visualize_model code count =
+  match ipm_path with
+  | Some path ->
+    let seq2string tm =
+      let open Boot.Ast in
+      match tm with
+      | TmSeq(fi, seq) -> tmseq2ustring fi seq |> to_utf8
+      | _ -> Boot.Msg.raise_error (tm_info tm) "Expected a string to visualize, but got other term"
+    in
+    let model_str = parse_and_eval code count |> seq2string in
+    let iframe_str = {|<embed src="http://localhost:3000/" width="100%" height="400"</embed>|} in
+    let file = path ^ "/src/visual/webpage/js/data-source.js" in
+    let oc = open_out file in
+    Printf.fprintf oc "%s\n" model_str;
+    close_out oc;
+    other_actions := Client.Kernel.mime ~ty:"text/html" iframe_str::!other_actions;
+    None
+  | None -> Boot.Msg.raise_error NoInfo "MI_IPM_PATH is unset; cannot use %%visualize"
 
 let is_expr pycode =
   try
@@ -72,30 +88,34 @@ let eval_python code =
     try BatString.rsplit code ~by:"\n"
     with Not_found -> ("", code)
   in
-  if is_expr expr then
-    begin
-      ignore @@ Py.Run.eval ~start:Py.File statements;
-      Py.Run.eval expr
-    end
+  let py_val = if is_expr expr then
+    (ignore @@ Py.Run.eval ~start:Py.File statements;
+    Py.Run.eval expr)
   else
     Py.Run.eval ~start:Py.File code
+  in
+  if py_val = Py.none then
+    None
+  else
+    Some(Py.Object.to_string py_val)
 
 let exec ~count code =
-  try
-    let result =
-      match get_python code with
-      | Some content ->
-        let py_val = eval_python content in
-        if py_val = Py.none then
-          None
-        else
-          Some(Py.Object.to_string py_val)
-      | None ->
-        parse_prog_or_mexpr (Printf.sprintf "In [%d]" count) code
-        |> repl_eval_ast
+  let magic_indicator, content =
+    try BatString.split code ~by:"\n"
+    with Not_found -> ("", code)
+  in
+  let result = try
+    Ok (
+      match magic_indicator with
+      | "%%python" -> eval_python content
+      | "%%visualize" -> visualize_model content count
+      | _ ->
+        parse_and_eval code count
         |> repl_format
-        |> Option.map to_utf8
-    in
+        |> Option.map to_utf8)
+    with e -> error_to_ustring e |> to_utf8 |> Result.error
+  in
+  let ok_message result =
     ignore @@ Py.Module.get_function ocaml_module "after_exec" [||];
     let new_actions =
       match BatIO.close_out !current_output with
@@ -105,15 +125,16 @@ let exec ~count code =
     let actions = List.rev new_actions in
     current_output := BatIO.output_string ();
     other_actions := [];
-    Lwt.return (Ok { Client.Kernel.msg=result
-                   ; Client.Kernel.actions=actions})
-  with e -> Lwt.return (Error (error_to_ustring e |> to_utf8))
+    { Client.Kernel.msg=result
+    ; Client.Kernel.actions=actions }
+  in
+  return (Result.map ok_message result)
 
 let complete ~pos str =
   let start_pos, completions = get_completions str pos in
-  Lwt.return { Client.Kernel.completion_matches = completions
-             ; Client.Kernel.completion_start = start_pos
-             ; Client.Kernel.completion_end = pos}
+  return { Client.Kernel.completion_matches = completions
+         ; Client.Kernel.completion_start = start_pos
+         ; Client.Kernel.completion_end = pos}
 
 let main =
   let mcore_kernel =
@@ -129,4 +150,11 @@ for creating embedded domain-specific and general-purpose languages"
       ~complete:complete
       () in
       let config = Client_main.mk_config ~usage:"Usage: kernel --connection-file {connection_file}" () in
-      Lwt_main.run (Client_main.main ~config:config ~kernel:mcore_kernel)
+      let kernel = Client_main.main ~config:config ~kernel:mcore_kernel in
+      match ipm_path with
+      | Some path ->
+          let ipm_server = Lwt_process.exec ~cwd:path
+            ("", [|"node"; "src/visual/boot.js"; "--no-open"|])
+          in
+          Lwt_main.run (kernel <&> (ipm_server >|= ignore))
+      | None -> Lwt_main.run kernel
