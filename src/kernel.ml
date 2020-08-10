@@ -1,13 +1,15 @@
 open Jupyter_kernel
 open Boot.Repl
 open Boot.Eval
-open Lwt
+open Lwt.Infix
 
 let to_utf8 = Boot.Ustring.to_utf8
 
 let current_output = ref (BatIO.output_string ())
 let other_actions = ref []
-let ipm_path = Sys.getenv_opt "MI_IPM_PATH"
+
+let enable_visualize = ref false
+let ipm_port = ref 0
 
 let text_data_of_string str =
   Client.Kernel.mime ~ty:"text/plain" str
@@ -52,15 +54,14 @@ let init () =
   Py.Module.set_function ocaml_module "after_exec" (fun _ -> Py.none);
   init_py_print ();
   init_py_mpl ();
-  return ()
+  Lwt.return ()
 
 let parse_and_eval code count =
   parse_prog_or_mexpr (Printf.sprintf "In [%d]" count) code
   |> repl_eval_ast
 
 let visualize_model code count =
-  match ipm_path with
-  | Some path ->
+  if !enable_visualize then
     let seq2string tm =
       let open Boot.Ast in
       match tm with
@@ -68,14 +69,14 @@ let visualize_model code count =
       | _ -> Boot.Msg.raise_error (tm_info tm) "Expected a string to visualize, but got other term"
     in
     let model_str = parse_and_eval code count |> seq2string in
-    let iframe_str = {|<embed src="http://localhost:3000/" width="100%" height="400"</embed>|} in
-    let file = path ^ "/src/visual/webpage/js/data-source.js" in
-    let oc = open_out file in
-    Printf.fprintf oc "%s\n" model_str;
-    close_out oc;
+    let iframe_str = Printf.sprintf {|<embed src="http://localhost:%d/" width="100%%" height="400"</embed>|} !ipm_port in
+    let uri = Uri.of_string (Printf.sprintf "http://localhost:%d/js/data-source.js" !ipm_port) in
+    let body = Cohttp_lwt.Body.of_string model_str in
+    Lwt_main.run (Cohttp_lwt_unix.Client.post ~body uri >|= ignore);
     other_actions := Client.Kernel.mime ~ty:"text/html" iframe_str::!other_actions;
     None
-  | None -> Boot.Msg.raise_error NoInfo "MI_IPM_PATH is unset; cannot use %%visualize"
+  else
+    Boot.Msg.raise_error NoInfo "The kernel is not running with support for %%visualize"
 
 let is_expr pycode =
   try
@@ -128,13 +129,30 @@ let exec ~count code =
     { Client.Kernel.msg=result
     ; Client.Kernel.actions=actions }
   in
-  return (Result.map ok_message result)
+  Lwt.return (Result.map ok_message result)
 
 let complete ~pos str =
   let start_pos, completions = get_completions str pos in
-  return { Client.Kernel.completion_matches = completions
-         ; Client.Kernel.completion_start = start_pos
-         ; Client.Kernel.completion_end = pos}
+  Lwt.return { Client.Kernel.completion_matches = completions
+             ; Client.Kernel.completion_start = start_pos
+             ; Client.Kernel.completion_end = pos}
+
+let get_open_port start_port max_port =
+  let open Unix in
+  let localhost port = ADDR_INET (inet_addr_loopback, port) in
+  let sock = socket PF_INET SOCK_STREAM 0 in
+  setsockopt sock SO_REUSEADDR true;
+  let rec iterate_ports port =
+    if port < max_port then
+      try
+        bind sock (localhost port);
+        close sock;
+        Some port
+      with Unix_error (EADDRINUSE,_,_) ->
+        iterate_ports (port + 1)
+    else
+      None
+  in iterate_ports start_port
 
 let main =
   let mcore_kernel =
@@ -148,13 +166,28 @@ for creating embedded domain-specific and general-purpose languages"
       ~init:init
       ~exec:exec
       ~complete:complete
-      () in
-      let config = Client_main.mk_config ~usage:"Usage: kernel --connection-file {connection_file}" () in
-      let kernel = Client_main.main ~config:config ~kernel:mcore_kernel in
-      match ipm_path with
-      | Some path ->
-          let ipm_server = Lwt_process.exec ~cwd:path
-            ("", [|"node"; "src/visual/boot.js"; "--no-open"|])
-          in
-          Lwt_main.run (kernel <&> (ipm_server >|= ignore))
-      | None -> Lwt_main.run kernel
+      ()
+  in
+  let ipm_exec = ref "default" in
+  let args = [ ("--enable-visualize", Arg.Set(enable_visualize), "Enable the %%visualize directive")
+             ; ("-v", Arg.Set(enable_visualize), "Short form of --enable-visualize")
+             ; ("--ipm-server", Arg.Set_string(ipm_exec), "For --enable-visualize: set the name of the IPM server executable")
+             ]
+  in
+  let config =
+    Client_main.mk_config ~usage:"Usage: kernel --connection-file {connection_file} [-v] [--ipm-server SERVER]"
+                          ~additional_args:args
+                          ()
+  in
+  let run_kernel () = Client_main.main ~config:config ~kernel:mcore_kernel in
+  if !enable_visualize then
+    match get_open_port 3030 3130 with
+    | Some p ->
+      let ipm_server = Lwt_process.exec
+        ("", [|!ipm_exec; "--no-file"; "-p"; string_of_int p|])
+      in
+      ipm_port := p;
+      Lwt_main.run (run_kernel () <&> (ipm_server >|= ignore))
+    | None -> prerr_endline "Failed to get open port... Exiting."
+  else
+    Lwt_main.run (run_kernel ())

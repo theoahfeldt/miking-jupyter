@@ -1,4 +1,4 @@
 (executable
   (name kernel)
-  (libraries boot jupyter-kernel pyml)
+  (libraries boot jupyter-kernel pyml cohttp-lwt-unix)
 )
