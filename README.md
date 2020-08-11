@@ -86,8 +86,9 @@ Once this is done, `jupyter-kernel` can be installed through `opam`, using:
 opam install jupyter-kernel
 ```
 
-Finally, to install the Jupyter kernel, use the `make.sh` script:
-(Note that you may first have to execute `chmod +x make.sh`)
+Finally, to install the Jupyter kernel, use the `make.sh` script
+(note that you may have to run `chmod +x make.sh` the first time to make the
+script executable):
 
 ```bash
 ./make.sh install
@@ -139,7 +140,7 @@ Running the cell will print `foobar`, as one might expect.
 
 You can call the functions you have defined in Python cells in normal MCore
 cells by using the Python intrinsics (for more information on these, see
-[README.md](./README.md) or the example notebook). A user-defined function can
+[README.md](https://github.com/miking-lang/miking/blob/develop/README.md#Python) or the example notebook). A user-defined function can
 be called by importing and using the Python module `__main__`. For example,
 consider the following cell:
 
