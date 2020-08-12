@@ -70,7 +70,7 @@ let visualize_model code count =
     in
     let model_str = parse_and_eval code count |> seq2string in
     let iframe_str = Printf.sprintf {|<embed src="http://localhost:%d/" width="100%%" height="400"</embed>|} !ipm_port in
-    let uri = Uri.of_string (Printf.sprintf "http://localhost:%d/js/data-source.js" !ipm_port) in
+    let uri = Uri.of_string (Printf.sprintf "http://localhost:%d/js/data-source.json" !ipm_port) in
     let body = Cohttp_lwt.Body.of_string model_str in
     Lwt_main.run (Cohttp_lwt_unix.Client.post ~body uri >|= ignore);
     other_actions := Client.Kernel.mime ~ty:"text/html" iframe_str::!other_actions;
