@@ -189,14 +189,14 @@ produce visualizations of user-created models in the notebook.
 
 To visualize a model, use the `%%visualize` directive in a cell whose output is
 a string representation of the relevant model; the IPM repo provides the
-function `formatModel` for this purpose. For instance, supposing `model` is
+function `formatModels` for this purpose. For instance, supposing `model` is
 a predefined DFA model and that the IPM visualization functions have been
 imported, running the following code in a cell would produce a visualization of
 the DFA:
 
 ```ocaml
 %%visualize
-formatModel [model]
+formatModels [model]
 ```
 
 For a more complete example, see the example interactive notebook.
