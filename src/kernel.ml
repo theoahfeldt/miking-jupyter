@@ -141,7 +141,6 @@ let get_open_port start_port max_port =
   let open Unix in
   let localhost port = ADDR_INET (inet_addr_loopback, port) in
   let sock = socket PF_INET SOCK_STREAM 0 in
-  setsockopt sock SO_REUSEADDR true;
   let rec iterate_ports port =
     if port < max_port then
       try
@@ -168,7 +167,6 @@ for creating embedded domain-specific and general-purpose languages"
       ~complete:complete
       ()
   in
-  let ipm_exec = ref "default" in
   let config =
     Client_main.mk_config ~usage:"Usage: kernel --connection-file CONNECTION_FILE" ()
   in
@@ -177,7 +175,7 @@ for creating embedded domain-specific and general-purpose languages"
     match get_open_port 3030 3130 with
     | Some p ->
       let ipm_server = Lwt_process.exec
-        ("", [|!ipm_exec; "--no-file"; "-p"; string_of_int p|])
+        ("", [|"ipm-server"; "--no-file"; "-p"; string_of_int p|])
       in
       ipm_port := p;
       Lwt_main.run (run_kernel () <&> (ipm_server >|= ignore))
