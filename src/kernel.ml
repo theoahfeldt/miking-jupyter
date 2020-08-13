@@ -8,7 +8,7 @@ let to_utf8 = Boot.Ustring.to_utf8
 let current_output = ref (BatIO.output_string ())
 let other_actions = ref []
 
-let enable_visualize = ref false
+let enable_visualize = Option.is_some (Sys.getenv_opt "MI_JUPYTER_IPM")
 let ipm_port = ref 0
 
 let text_data_of_string str =
@@ -61,7 +61,7 @@ let parse_and_eval code count =
   |> repl_eval_ast
 
 let visualize_model code count =
-  if !enable_visualize then
+  if enable_visualize then
     let seq2string tm =
       let open Boot.Ast in
       match tm with
@@ -169,18 +169,11 @@ for creating embedded domain-specific and general-purpose languages"
       ()
   in
   let ipm_exec = ref "default" in
-  let args = [ ("--enable-visualize", Arg.Set(enable_visualize), "Enable the %%visualize directive")
-             ; ("-v", Arg.Set(enable_visualize), "Short form of --enable-visualize")
-             ; ("--ipm-server", Arg.Set_string(ipm_exec), "For --enable-visualize: set the name of the IPM server executable")
-             ]
-  in
   let config =
-    Client_main.mk_config ~usage:"Usage: kernel --connection-file {connection_file} [-v] [--ipm-server SERVER]"
-                          ~additional_args:args
-                          ()
+    Client_main.mk_config ~usage:"Usage: kernel --connection-file CONNECTION_FILE" ()
   in
   let run_kernel () = Client_main.main ~config:config ~kernel:mcore_kernel in
-  if !enable_visualize then
+  if enable_visualize then
     match get_open_port 3030 3130 with
     | Some p ->
       let ipm_server = Lwt_process.exec
