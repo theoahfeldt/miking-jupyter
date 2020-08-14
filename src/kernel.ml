@@ -2,14 +2,19 @@ open Jupyter_kernel
 open Boot.Repl
 open Boot.Eval
 open Lwt.Infix
+open Printf
 
 let to_utf8 = Boot.Ustring.to_utf8
+let raise_error = Boot.Msg.raise_error
 
 let current_output = ref (BatIO.output_string ())
 let other_actions = ref []
 
-let enable_visualize = Option.is_some (Sys.getenv_opt "MI_JUPYTER_IPM")
 let ipm_port = ref 0
+let ipm_initialized = ref false
+let ipm_visualiziation_supported = ref true
+let ipm_start_signal = Lwt_mvar.create_empty ()
+let ipm_start_response = Lwt_mvar.create_empty ()
 
 let text_data_of_string str =
   Client.Kernel.mime ~ty:"text/plain" str
@@ -57,26 +62,42 @@ let init () =
   Lwt.return ()
 
 let parse_and_eval code count =
-  parse_prog_or_mexpr (Printf.sprintf "In [%d]" count) code
+  parse_prog_or_mexpr (sprintf "In [%d]" count) code
   |> repl_eval_ast
 
+let init_ipm () =
+  Lwt_mvar.put ipm_start_signal true >>= fun () ->
+  Lwt_mvar.take ipm_start_response >|= fun server_started ->
+  ipm_visualiziation_supported := server_started
+
 let visualize_model code count =
-  if enable_visualize then
+  begin
+    if not !ipm_initialized then
+      (init_ipm () >|= fun () ->
+       ipm_initialized := true)
+    else
+      Lwt.return ()
+  end >>= fun _ ->
+  if !ipm_visualiziation_supported then
     let seq2string tm =
       let open Boot.Ast in
       match tm with
       | TmSeq(fi, seq) -> tmseq2ustring fi seq |> to_utf8
-      | _ -> Boot.Msg.raise_error (tm_info tm) "Expected a string to visualize, but got other term"
+      | _ -> raise_error (tm_info tm) "Expected a string to visualize, but got other term"
     in
     let model_str = parse_and_eval code count |> seq2string in
-    let iframe_str = Printf.sprintf {|<embed src="http://localhost:%d/" width="100%%" height="400"</embed>|} !ipm_port in
-    let uri = Uri.of_string (Printf.sprintf "http://localhost:%d/js/data-source.json" !ipm_port) in
+    let iframe_str = sprintf {|<embed src="http://localhost:%d/" width="100%%" height="400"</embed>|} !ipm_port in
+    let uri = Uri.of_string (sprintf "http://localhost:%d/js/data-source.json" !ipm_port) in
     let body = Cohttp_lwt.Body.of_string model_str in
-    Lwt_main.run (Cohttp_lwt_unix.Client.post ~body uri >|= ignore);
     other_actions := Client.Kernel.mime ~ty:"text/html" iframe_str::!other_actions;
-    None
+    Lwt.catch
+      (fun () -> Cohttp_lwt_unix.Client.post ~body uri >|= ignore)
+      (function
+       | Unix.Unix_error (ECONNREFUSED,_,_) -> raise_error NoInfo "Failed to contact the visualization server. Make sure that it was installed correctly"
+       | e -> Lwt.fail e) >>= fun _ ->
+        Lwt.return None
   else
-    Boot.Msg.raise_error NoInfo "The kernel is not running with support for %%visualize"
+    raise_error NoInfo "The visualization server could not be started, running without support for %%visualize"
 
 let is_expr pycode =
   try
@@ -95,26 +116,32 @@ let eval_python code =
   else
     Py.Run.eval ~start:Py.File code
   in
-  if py_val = Py.none then
-    None
-  else
-    Some(Py.Object.to_string py_val)
+  Lwt.return
+    (if py_val = Py.none then
+       None
+     else
+       Some (Py.Object.to_string py_val))
 
 let exec ~count code =
   let magic_indicator, content =
     try BatString.split code ~by:"\n"
     with Not_found -> ("", code)
   in
-  let result = try
-    Ok (
-      match magic_indicator with
-      | "%%python" -> eval_python content
-      | "%%visualize" -> visualize_model content count
-      | _ ->
-        parse_and_eval code count
-        |> repl_format
-        |> Option.map to_utf8)
-    with e -> error_to_ustring e |> to_utf8 |> Result.error
+  let result =
+    Lwt.catch
+      (fun () ->
+        (match magic_indicator with
+         | "%%python" -> eval_python content
+         | "%%visualize" -> visualize_model content count
+         | _ ->
+            parse_and_eval code count
+            |> repl_format
+            |> Option.map to_utf8
+            |> Lwt.return) >|= Result.ok)
+      (fun e -> error_to_ustring e
+                |> to_utf8
+                |> Result.error
+                |> Lwt.return)
   in
   let ok_message result =
     ignore @@ Py.Module.get_function ocaml_module "after_exec" [||];
@@ -129,13 +156,21 @@ let exec ~count code =
     { Client.Kernel.msg=result
     ; Client.Kernel.actions=actions }
   in
-  Lwt.return (Result.map ok_message result)
+  result >|= Result.map ok_message
 
 let complete ~pos str =
   let start_pos, completions = get_completions str pos in
   Lwt.return { Client.Kernel.completion_matches = completions
              ; Client.Kernel.completion_start = start_pos
-             ; Client.Kernel.completion_end = pos}
+             ; Client.Kernel.completion_end = pos }
+
+let executable_in_path name =
+  let path = String.split_on_char ':' (Option.default "" (Sys.getenv_opt "PATH")) in
+  let name_in_dir dir =
+    try Unix.access (sprintf "%s/%s" dir name) [ X_OK ]; true
+    with _ -> false
+  in
+  List.exists name_in_dir path
 
 let get_open_port start_port max_port =
   let open Unix in
@@ -153,7 +188,25 @@ let get_open_port start_port max_port =
       None
   in iterate_ports start_port
 
-let main =
+let run_ipm () =
+  Lwt_mvar.take ipm_start_signal >>= fun try_to_start ->
+  if try_to_start then
+    if executable_in_path "ipm-server" then
+      match get_open_port 3030 3130 with
+      | Some p ->
+          ipm_port := p;
+          Lwt_process.exec ("", [|"ipm-server"; "--no-file"; "-p"; string_of_int p|]) >|= ignore
+          <&> Lwt_mvar.put ipm_start_response true
+      | None ->
+         prerr_endline "Failed to get open port for server...";
+         Lwt_mvar.put ipm_start_response false
+    else
+      (prerr_endline "Failed to find server executable in path...";
+       Lwt_mvar.put ipm_start_response false)
+  else
+    Lwt.return ()
+
+let run_kernel () =
   let mcore_kernel =
     Client.Kernel.make
       ~language:"MCore"
@@ -162,23 +215,14 @@ let main =
       ~codemirror_mode:"mcore"
       ~banner:"The core language of Miking - a meta language system
 for creating embedded domain-specific and general-purpose languages"
-      ~init:init
-      ~exec:exec
-      ~complete:complete
+      ~init
+      ~exec
+      ~complete
       ()
   in
-  let config =
-    Client_main.mk_config ~usage:"Usage: kernel --connection-file CONNECTION_FILE" ()
-  in
-  let run_kernel () = Client_main.main ~config:config ~kernel:mcore_kernel in
-  if enable_visualize then
-    match get_open_port 3030 3130 with
-    | Some p ->
-      let ipm_server = Lwt_process.exec
-        ("", [|"ipm-server"; "--no-file"; "-p"; string_of_int p|])
-      in
-      ipm_port := p;
-      Lwt_main.run (run_kernel () <&> (ipm_server >|= ignore))
-    | None -> prerr_endline "Failed to get open port... Exiting."
-  else
-    Lwt_main.run (run_kernel ())
+  let config = Client_main.mk_config
+                 ~usage:"Usage: kernel --connection-file CONNECTION_FILE" () in
+  Client_main.main ~config ~kernel:mcore_kernel >>= fun _ ->
+  Lwt_mvar.put ipm_start_signal false
+
+let main = Lwt_main.run (run_kernel () <&> run_ipm ())
