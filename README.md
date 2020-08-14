@@ -182,17 +182,14 @@ https://github.com/miking-lang/miking-ipm to install the IPM visualization
 server. Make sure that the `ipm-server` executable is available in `PATH` and
 that you are able to run it from the command line.
 
-Now, to enable the notebook support, set the environment variable
-`MI_JUPYTER_IPM` in the shell before running `jupyter notebook`. This will make
-the kernel run a visualization server in the background which it can use to
-produce visualizations of user-created models in the notebook.
+To visualize a model, use the `%%visualize` directive. The visualization server
+will be started in the background the first time the directive is used.
 
-To visualize a model, use the `%%visualize` directive in a cell whose output is
-a string representation of the relevant model; the IPM repo provides the
-function `formatModels` for this purpose. For instance, supposing `model` is
-a predefined DFA model and that the IPM visualization functions have been
-imported, running the following code in a cell would produce a visualization of
-the DFA:
+Use `%%visualize` in a cell whose output is a string representation of the
+relevant model; the IPM repo provides the function `formatModels` for this
+purpose. For instance, supposing `model` is a predefined DFA model and that the
+IPM visualization functions have been imported, running the following code in a
+cell would produce a visualization of the DFA:
 
 ```ocaml
 %%visualize
