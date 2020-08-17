@@ -198,7 +198,8 @@ let run_ipm () =
         | Some p ->
             ipm_port := p;
             Lwt_process.exec ("", [|"ipm-server"; "--no-file"; "-p"; string_of_int p|]) >|= ignore
-            <&> Lwt_mvar.put ipm_start_response true
+            <&> (Lwt_unix.sleep 0.5 >>= fun _ ->
+                 Lwt_mvar.put ipm_start_response true)
         | None ->
            prerr_endline "Failed to get open port for server...";
            Lwt_mvar.put ipm_start_response false
