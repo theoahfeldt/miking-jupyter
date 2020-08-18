@@ -1,11 +1,22 @@
 open Jupyter_kernel
 open Boot.Repl
 open Boot.Eval
+open Lwt.Infix
+open Printf
 
 let to_utf8 = Boot.Ustring.to_utf8
 
 let current_output = ref (BatIO.output_string ())
 let other_actions = ref []
+
+let ipm_port = ref 0
+let ipm_start_signal = Lwt_mvar.create_empty ()
+let ipm_start_response = Lwt_mvar.create_empty ()
+
+let peek_mvar mvar =
+  Lwt_mvar.take mvar >>= fun x ->
+  Lwt_mvar.put mvar x >>= fun _ ->
+  Lwt.return x
 
 let text_data_of_string str =
   Client.Kernel.mime ~ty:"text/plain" str
@@ -52,14 +63,38 @@ let init () =
   init_py_mpl ();
   Lwt.return ()
 
-let get_python code =
-  let python_indicator, content =
-    try BatString.split code ~by:"\n"
-    with Not_found -> ("", code)
-  in
-  match python_indicator with
-  | "%%python" -> Some content
-  | _ -> None
+let parse_and_eval count code =
+  parse_prog_or_mexpr (sprintf "In [%d]" count) code
+  |> repl_eval_ast
+
+let visualize_model count code =
+  let raise_error = Boot.Msg.raise_error in
+  (if Lwt_mvar.is_empty ipm_start_signal then
+    Lwt_mvar.put ipm_start_signal true
+  else
+    Lwt.return ())
+  >>= fun _ ->
+  peek_mvar ipm_start_response >>= fun visualization_supported ->
+  if visualization_supported then
+    let seq2string tm =
+      let open Boot.Ast in
+      match tm with
+      | TmSeq(fi, seq) -> tmseq2ustring fi seq |> to_utf8
+      | _ -> raise_error (tm_info tm) "Expected a string to visualize, but got other term"
+    in
+    let model_str = parse_and_eval count code |> seq2string in
+    let iframe_str = sprintf {|<embed src="http://localhost:%d/" width="100%%" height="400"</embed>|} !ipm_port in
+    let uri = Uri.of_string (sprintf "http://localhost:%d/js/data-source.json" !ipm_port) in
+    let body = Cohttp_lwt.Body.of_string model_str in
+    other_actions := Client.Kernel.mime ~ty:"text/html" iframe_str :: !other_actions;
+    Lwt.catch
+      (fun () -> Cohttp_lwt_unix.Client.post ~body uri >|= fun _ -> None)
+      (function
+        | Unix.Unix_error (ECONNREFUSED,_,_) ->
+          raise_error NoInfo "Failed to contact the visualization server. Make sure that it was installed correctly"
+        | e -> Lwt.fail e)
+  else
+    raise_error NoInfo "The visualization server could not be started, running without support for %%visualize"
 
 let is_expr pycode =
   try
@@ -72,30 +107,45 @@ let eval_python code =
     try BatString.rsplit code ~by:"\n"
     with Not_found -> ("", code)
   in
-  if is_expr expr then
-    begin
-      ignore @@ Py.Run.eval ~start:Py.File statements;
-      Py.Run.eval expr
-    end
+  let py_val = if is_expr expr then
+    (ignore @@ Py.Run.eval ~start:Py.File statements;
+    Py.Run.eval expr)
   else
     Py.Run.eval ~start:Py.File code
+  in
+  if py_val = Py.none then
+    None
+  else
+    Some (Py.Object.to_string py_val)
+
+let evaluate_cell count code =
+  let magic_indicator, content =
+    try BatString.split code ~by:"\n"
+    with Not_found -> ("", code)
+  in
+  match magic_indicator with
+   | "%%visualize" -> visualize_model count content
+   | _ -> Lwt.return @@
+     match magic_indicator with
+     | "%%python" -> eval_python content
+     | _ ->
+       parse_and_eval count code
+       |> repl_format
+       |> Option.map to_utf8
 
 let exec ~count code =
-  try
-    let result =
-      match get_python code with
-      | Some content ->
-        let py_val = eval_python content in
-        if py_val = Py.none then
-          None
-        else
-          Some(Py.Object.to_string py_val)
-      | None ->
-        parse_prog_or_mexpr (Printf.sprintf "In [%d]" count) code
-        |> repl_eval_ast
-        |> repl_format
-        |> Option.map to_utf8
-    in
+  let result =
+    Lwt.catch
+      (fun () ->
+        evaluate_cell count code
+        >|= Result.ok)
+      (fun e ->
+        error_to_ustring e
+        |> to_utf8
+        |> Result.error
+        |> Lwt.return)
+  in
+  let ok_message result =
     ignore @@ Py.Module.get_function ocaml_module "after_exec" [||];
     let new_actions =
       match BatIO.close_out !current_output with
@@ -105,17 +155,61 @@ let exec ~count code =
     let actions = List.rev new_actions in
     current_output := BatIO.output_string ();
     other_actions := [];
-    Lwt.return (Ok { Client.Kernel.msg=result
-                   ; Client.Kernel.actions=actions})
-  with e -> Lwt.return (Error (error_to_ustring e |> to_utf8))
+    { Client.Kernel.msg=result
+    ; Client.Kernel.actions=actions }
+  in
+  result >|= Result.map ok_message
 
 let complete ~pos str =
   let start_pos, completions = get_completions str pos in
   Lwt.return { Client.Kernel.completion_matches = completions
              ; Client.Kernel.completion_start = start_pos
-             ; Client.Kernel.completion_end = pos}
+             ; Client.Kernel.completion_end = pos }
 
-let main =
+let executable_in_path name =
+  let path = String.split_on_char ':' (Option.default "" (Sys.getenv_opt "PATH")) in
+  let name_in_dir dir =
+    try Unix.access (sprintf "%s/%s" dir name) [ X_OK ]; true
+    with _ -> false
+  in
+  List.exists name_in_dir path
+
+let get_open_port start_port max_port =
+  let open Unix in
+  let localhost port = ADDR_INET (inet_addr_loopback, port) in
+  let sock = socket PF_INET SOCK_STREAM 0 in
+  let rec iterate_ports port =
+    if port < max_port then
+      try
+        bind sock (localhost port);
+        close sock;
+        Some port
+      with Unix_error (EADDRINUSE,_,_) ->
+        iterate_ports (port + 1)
+    else
+      None
+  in iterate_ports start_port
+
+let run_ipm () =
+  peek_mvar ipm_start_signal >>= fun try_to_start ->
+    if try_to_start then
+      if executable_in_path "ipm-server" then
+        match get_open_port 3030 3130 with
+        | Some p ->
+            ipm_port := p;
+            Lwt_process.exec ("", [|"ipm-server"; "--no-file"; "-p"; string_of_int p|]) >|= ignore
+            <&> (Lwt_unix.sleep 0.5 >>= fun _ ->
+                 Lwt_mvar.put ipm_start_response true)
+        | None ->
+           prerr_endline "Failed to get open port for server...";
+           Lwt_mvar.put ipm_start_response false
+      else
+        (prerr_endline "Failed to find server executable in path...";
+         Lwt_mvar.put ipm_start_response false)
+    else
+      Lwt.return ()
+
+let run_kernel () =
   let mcore_kernel =
     Client.Kernel.make
       ~language:"MCore"
@@ -124,9 +218,14 @@ let main =
       ~codemirror_mode:"mcore"
       ~banner:"The core language of Miking - a meta language system
 for creating embedded domain-specific and general-purpose languages"
-      ~init:init
-      ~exec:exec
-      ~complete:complete
-      () in
-      let config = Client_main.mk_config ~usage:"Usage: kernel --connection-file {connection_file}" () in
-      Lwt_main.run (Client_main.main ~config:config ~kernel:mcore_kernel)
+      ~init
+      ~exec
+      ~complete
+      ()
+  in
+  let config = Client_main.mk_config
+                 ~usage:"Usage: kernel --connection-file CONNECTION_FILE" () in
+  Client_main.main ~config ~kernel:mcore_kernel >>= fun _ ->
+  Lwt_mvar.put ipm_start_signal false
+
+let main = Lwt_main.run (run_kernel () <&> run_ipm ())

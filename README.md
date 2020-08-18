@@ -173,6 +173,32 @@ let _ = pycall plt "plot" (x,)
 While this example uses the Python intrinsics, running the plot code directly in
 a Python cell would of course also work.
 
+#### IPM visualization
+
+It is also possible to display visualizations of programmatic models from
+[The Miking Interactive Programmatic Modeling (IPM) Environment](https://github.com/miking-lang/miking-ipm).
+
+Start by following the installation instructions at
+https://github.com/miking-lang/miking-ipm to install the IPM visualization
+server. Make sure that the `ipm-server` executable is available in `PATH` and
+that you are able to run it from the command line.
+
+To visualize a model, use the `%%visualize` directive. The visualization server
+will be started in the background the first time the directive is used.
+
+Use `%%visualize` in a cell whose output is a string representation of the
+relevant model; the IPM repo provides the function `formatModels` for this
+purpose. For instance, supposing `model` is a predefined DFA model and that the
+IPM visualization functions have been imported, running the following code in a
+cell would produce a visualization of the DFA:
+
+```ocaml
+%%visualize
+formatModels [model]
+```
+
+For a more complete example, see the example interactive notebook.
+
 ### Interactive notebook
 
 If you followed the installation instructions above, you can try out the
