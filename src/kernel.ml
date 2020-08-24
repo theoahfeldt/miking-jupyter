@@ -223,6 +223,9 @@ for creating embedded domain-specific and general-purpose languages"
   let config = Client_main.mk_config
                  ~usage:"Usage: kernel --connection-file CONNECTION_FILE" () in
   Client_main.main ~config ~kernel:mcore_kernel >>= fun _ ->
-  Lwt_mvar.put ipm_start_signal false
+  if Lwt_mvar.is_empty ipm_start_signal then
+    Lwt_mvar.put ipm_start_signal false
+  else
+    Lwt.return ()
 
 let main = Lwt_main.run (run_kernel () <&> run_ipm ())
