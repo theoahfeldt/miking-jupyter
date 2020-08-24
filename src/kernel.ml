@@ -7,8 +7,8 @@ open Printf
 let to_utf8 = Boot.Ustring.to_utf8
 
 let current_output = ref (BatIO.output_string ())
-let other_actions = ref []
 
+let rich_results = ref []
 let ipm_port = ref 0
 let ipm_start_signal = Lwt_mvar.create_empty ()
 let ipm_start_response = Lwt_mvar.create_empty ()
@@ -17,9 +17,6 @@ let peek_mvar mvar =
   Lwt_mvar.take mvar >>= fun x ->
   Lwt_mvar.put mvar x >>= fun _ ->
   Lwt.return x
-
-let text_data_of_string str =
-  Client.Kernel.mime ~ty:"text/plain" str
 
 let kernel_output_string str = BatIO.nwrite !current_output str
 let kernel_output_ustring ustr = ustr |> to_utf8 |> kernel_output_string
@@ -50,7 +47,7 @@ sys.path.append(os.path.expanduser('~') + '/.local/lib/mcore/kernel')
 os.environ['MPLBACKEND']='module://mpl_backend'";
   let py_ocaml_show args =
     let data = Py.String.to_string args.(0) in
-    other_actions := Client.Kernel.mime ~base64:true ~ty:"image/png" data :: !other_actions;
+    rich_results := Client.Kernel.mime ~base64:true ~ty:"image/png" data :: !rich_results;
     Py.none
   in
   Py.Module.set_function ocaml_module "ocaml_show" py_ocaml_show
@@ -86,7 +83,7 @@ let visualize_model count code =
     let iframe_str = sprintf {|<embed src="http://localhost:%d/" width="100%%" height="400"</embed>|} !ipm_port in
     let uri = Uri.of_string (sprintf "http://localhost:%d/js/data-source.json" !ipm_port) in
     let body = Cohttp_lwt.Body.of_string model_str in
-    other_actions := Client.Kernel.mime ~ty:"text/html" iframe_str :: !other_actions;
+    rich_results := Client.Kernel.mime ~ty:"text/html" iframe_str :: !rich_results;
     Lwt.catch
       (fun () -> Cohttp_lwt_unix.Client.post ~body uri >|= fun _ -> None)
       (function
@@ -147,14 +144,14 @@ let exec ~count code =
   in
   let ok_message result =
     ignore @@ Py.Module.get_function ocaml_module "after_exec" [||];
-    let new_actions =
+    let new_results =
       match BatIO.close_out !current_output with
-      | "" -> !other_actions
-      | s -> text_data_of_string s :: !other_actions
+      | "" -> !rich_results
+      | s -> Client.Kernel.mime ~ty:"text/plain" s :: !rich_results
     in
-    let actions = List.rev new_actions in
+    let actions = List.rev new_results in
     current_output := BatIO.output_string ();
-    other_actions := [];
+    rich_results := [];
     { Client.Kernel.msg=result
     ; Client.Kernel.actions=actions }
   in
